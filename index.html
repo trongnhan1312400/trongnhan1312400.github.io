@@ -1,0 +1,444 @@
+<html>
+	<head>
+		<audio id = "sound" src = "audio\sound.wav"></audio>
+		<canvas id = "mainScence"></canvas>>
+		<canvas id = " supportScence"></canvas>
+		<title>Megaminx</title>
+		<style>
+			body { margin: 0; }
+			#mainScence {position: absolute; top: 0px; left: 0px;}
+			#supportScence {position: absolute; top: 0px; right: 0px;}
+		</style>
+	</head>
+	<body>
+		<script src="js/three.min.js"></script>
+		<script src="js/OrbitControls.js"></script>
+		<script src="js/dat.gui.min.js"></script>
+		<script src="js/megaminx.js"></script>
+		<script src="js/Compute_and_Transform.js"></script>
+		<script>
+
+			var	DEG_TO_RAD = Math.PI / 180;
+			var megaminxSize;
+
+			var scene;
+			var camera;
+			var control;
+
+			var mainRenderer;
+			var supportRenderer = [];
+			var mouse;
+			var raycaster;
+
+			var supportCamera = [];
+			var supportContainer;
+
+			var megaminx;
+			var cameraRadius;
+
+			var lookupTable;
+
+			var animate;
+			var speed;
+			var isPlaying;
+			var dir;
+			var isCreated;
+			var rotateFace;
+			var currentFace;
+			var rotateCorner;
+			var isRotate;
+
+			var audio;
+
+			var undoSteps = [];
+			var redoSteps = [];
+
+			var cWidth;
+			var cHeight;
+
+			var gui;
+
+			var isDisableSupportThings;
+
+			function initSupportThings()
+			{	
+				var tWidth = 0;
+				var tHeight = 0;
+
+				var ratio = cWidth / cHeight;
+
+				supportContainer = document.createElement('div');
+				supportContainer.id = 'supportContainer';
+				supportContainer.style.position = 'absolute';
+				supportContainer.style.top = '0px';
+				supportContainer.style.left = '0px';
+				supportContainer.style.width = '100%';
+				supportContainer.style.height = '100%';
+
+				document.body.appendChild(supportContainer);
+
+				for (var i = 0; i < 6; i++)
+				{
+					for (var j = 2; j < 4; j++)
+					{
+						var tRenderer = new THREE.WebGLRenderer({antialias: true});
+						tRenderer.setSize(cWidth, cHeight);
+						var tCanvas = tRenderer.domElement;
+						tCanvas.id = "supportScence" + i;
+						supportContainer.appendChild(tCanvas);
+						tCanvas.style.position = "absolute";
+						tWidth = cWidth * j;
+						tHeight = cHeight * i;
+						tCanvas.style.top = tHeight;
+						tCanvas.style.left = tWidth;
+
+						var tCamera = new THREE.PerspectiveCamera(75, ratio, 0.1, 10);
+						var tPosition = lookupTable[i * 2 + j - 2].axis.clone();
+						tPosition.x += 0.01
+						tPosition.normalize();
+						tCamera.position.copy(tPosition).multiplyScalar(cameraRadius);
+						tCamera.lookAt(new THREE.Vector3(0, 0, 0));
+
+						supportRenderer.push(tRenderer);
+						supportCamera.push(tCamera);
+					}
+				}
+			}
+
+			function clearSupportContainer()
+			{
+				for (var i = 0; i < 12; i++)
+				{
+					supportContainer.removeChild(supportContainer.childNodes[0]);
+				}
+			}
+
+			function setSupportContainer()
+			{
+				for (var i = 0; i < 12; i++)
+				{
+					supportContainer.appendChild(supportRenderer[i].domElement);
+				}
+			}
+
+			function fixSupportThing()
+			{
+				var tWidth = 0;
+				var tHeight = 0;
+
+				var ratio = cWidth / cHeight;
+
+				for (var i = 0; i < 6; i++)
+				{
+					for (var j = 2; j < 4; j++)
+					{
+						supportRenderer[i * 2 + j - 2].setSize(cWidth, cHeight);
+						var tCanvas = supportRenderer[i * 2 + j - 2].domElement;
+						tWidth = cWidth * j;
+						tHeight = cHeight * i;
+						tCanvas.style.top = tHeight;
+						tCanvas.style.left = tWidth;
+
+						supportCamera[i * 2 + j - 2].aspect = ratio;
+						supportCamera[i * 2 + j - 2].updateProjectionMatrix();
+					}
+				}
+			}
+
+			var disableSupportScences = 
+			{
+				func: function()
+				{
+					if (!isDisableSupportThings)
+					{
+						isDisableSupportThings = true;
+						gui.__controllers[3].name('Enable support scenes');
+						gui.__controllers[3].updateDisplay();
+
+						mainRenderer.setSize(window.innerWidth, innerHeight);
+						camera.aspect = window.innerWidth / window.innerHeight;
+						camera.updateProjectionMatrix();
+
+						clearSupportContainer();
+					}
+					else
+					{
+						isDisableSupportThings = false;
+						gui.__controllers[3].name('Disable support scenes');
+						gui.__controllers[3].updateDisplay();
+
+						mainRenderer.setSize(window.innerWidth / 2, innerHeight);
+						camera.aspect = window.innerWidth / 2 / window.innerHeight;
+						camera.updateProjectionMatrix();
+
+						setSupportContainer();
+					}
+				}
+			}
+
+			var newButton = 
+			{
+				func: function()
+				{
+					for (var i = 0; i < megaminx.length; i++)
+					{
+						for (var j = 0; j < megaminx[i].length; j++)
+						{
+							megaminx[i][j].color = faceColors[i];
+						}
+					}
+
+					updateMegaminx(megaminx);
+
+					redoSteps = [];
+					undoSteps = [];
+				}
+			};
+
+			var redoButton =
+			{
+				func: function()
+				{
+					if (currentFace < 0 && redoSteps.length > 0)
+					{
+						currentFace = redoSteps[redoSteps.length - 1].face;
+						isPlaying = true;
+						dir = redoSteps[redoSteps.length - 1].dir;
+
+						undoSteps.push({face: currentFace, dir: -dir});
+						redoSteps.pop();
+					}
+				}
+			};
+
+			var undoButton =
+			{
+				func: function()
+				{
+					if (currentFace < 0 && undoSteps.length > 0)
+					{
+						currentFace = undoSteps[undoSteps.length - 1].face;
+						isPlaying = true;
+						dir = undoSteps[undoSteps.length - 1].dir;
+
+						redoSteps.push({face: currentFace, dir: -dir});
+						undoSteps.pop();
+					}
+				}
+			};
+
+			function createRotateObj(megaminx)
+			{
+				if (isCreated == false)
+				{
+					animate = getRotateCellsIndex(megaminx, currentFace);
+					animate = getObjFromCellsIndex(megaminx, animate);
+
+					scene.add(animate);
+
+					isCreated = true;
+				}
+			};
+
+
+			var init = function()
+			{
+				cWidth = window.innerWidth / 4;
+				cHeight = window.innerHeight / 6;
+				cameraRadius = 5;
+				scene = new THREE.Scene();
+
+				megaminxSize = 1;
+				megaminx = createMegaminx(megaminxSize);
+				addMegaminxToSence(scene, megaminx);
+
+				initSupportThings();
+
+				var mainCanvas = document.getElementById("mainScence");
+
+				mainRenderer = new THREE.WebGLRenderer({antialias: true, canvas: mainCanvas});
+				mainRenderer.setSize(window.innerWidth / 2, window.innerHeight);
+
+				document.body.appendChild(mainRenderer.domElement);
+				var ratio = mainRenderer.domElement.width / mainRenderer.domElement.height;
+
+				camera = new THREE.PerspectiveCamera( 75, ratio, 0.1, 10);
+				camera.position.z = cameraRadius;
+
+				control = new THREE.OrbitControls(camera, mainRenderer.domElement);
+				control.enablePan = false;
+				control.enableDamping = true;
+				control.dampingFactor = 0.25;
+				control.enableZoom = false;
+				control.rotateSpeed = 0.25;
+				control.minPolarAngle = 1 * DEG_TO_RAD;
+				control.maxPolarAngle = Math.PI - 1 * DEG_TO_RAD;
+
+				raycaster = new THREE.Raycaster();
+
+				mouse = new THREE.Vector2();
+
+				speed = {value: 10};
+				isPlaying = false;
+				dir = 1;
+				isCreated = false;
+				rotateFace = -1;
+				currentFace = -1;
+				rotateCorner = 0;
+
+				undoSteps = [];
+				redoSteps = [];
+
+				gui = new dat.GUI( { autoPlace: false } );
+				gui.domElement.id = 'gui';
+
+				document.body.appendChild(gui.domElement);
+
+				gui.add(newButton, 'func').name('New');
+				gui.add(undoButton, 'func').name('Undo');
+				gui.add(redoButton, 'func').name('Redo');
+				gui.add(disableSupportScences, 'func').name('Disable support scenes');
+				gui.add(speed, 'value', 5, 25, 0.5).name('Rotate speed');
+				gui.close();
+
+				gui.domElement.style.position = 'absolute';
+				gui.domElement.style.top = "0px";
+				gui.domElement.style.left = "0px";
+
+				audio = document.getElementById("sound");
+
+				mainRenderer.domElement.addEventListener( 'mousemove', onMouseMove );
+				mainRenderer.domElement.addEventListener('mouseup', onMouseUp);
+
+				window.addEventListener('resize', onWindowResize);
+
+				var mainInterval = setInterval(render, 16);
+				var supportInterval = setInterval(supportRender, 100);
+			}
+
+			function onWindowResize()
+			{
+				var newWidth = window.innerWidth;
+				
+				if (!isDisableSupportThings)
+				{
+					newWidth /= 2;
+				}
+
+				mainRenderer.setSize(newWidth, window.innerHeight);
+				cWidth = window.innerWidth / 4;
+				cHeight = window.innerHeight / 6;
+
+				var ratio = mainRenderer.domElement.width / mainRenderer.domElement.height;
+
+				camera.aspect = ratio;
+				camera.updateProjectionMatrix();
+
+				fixSupportThing();
+			}
+
+			function onMouseMove(event)
+			{
+				mouse.x = ( event.clientX / mainRenderer.domElement.width ) * 2 - 1;
+				mouse.y = - ( event.clientY / mainRenderer.domElement.height ) * 2 + 1;
+			}
+
+			function onMouseUp(event)
+			{
+				if (isPlaying == false && rotateFace >= 0)
+				{
+					currentFace = rotateFace;
+
+					isPlaying = true;
+				
+					if (event.button == 0)
+					{
+						dir = 1;
+					}
+					else if (event.button == 2)
+					{
+						dir = -1;
+					}
+
+					if (rotateFace > 0)
+					{
+						isRotate = true;
+					}
+
+					undoSteps.push({face: currentFace, dir: -dir});
+					redoSteps = [];
+				}
+			}
+
+			function pick()
+			{
+				raycaster.setFromCamera(mouse.clone(), camera );
+
+				var intersects = raycaster.intersectObjects(scene.children);
+
+				if (intersects.length > 0)
+				{
+					rotateFace = intersects[0].object.belongingFace;
+				}
+				else
+				{
+					rotateFace = -1;
+				}
+			}
+
+			var render = function () 
+			{
+				pick();
+
+				if (currentFace < 0)
+				{
+					isPlaying = false;
+				}
+
+				if (isPlaying == true)
+				{
+					createRotateObj(megaminx);
+					animate.rotateOnAxis(lookupTable[currentFace].axis, dir * 0.72 * speed.value * DEG_TO_RAD)
+
+					rotateCorner += 0.72 * speed.value;
+
+					if (rotateCorner >= 72)
+					{
+						rotateCorner = 0;
+
+						removeCellsFromObj(megaminx, getRotateCellsIndex(megaminx, currentFace), animate);
+						scene.remove(animate);
+
+						updateRotateCell(megaminx, currentFace, dir);
+						updateMegaminx(megaminx);
+
+						addMegaminxToSence(scene, megaminx);
+
+						audio.play();
+
+						isPlaying = false;
+						isCreated = false;
+						currentFace = -1;
+					}
+				}
+				
+				control.update();
+				
+				mainRenderer.render(scene, camera);
+			};
+
+			function supportRender()
+			{
+				if (!isDisableSupportThings)
+				{
+					for (var i = 0; i < 12; i++)
+					{
+						supportRenderer[i].render(scene, supportCamera[i]);					
+					}
+				}
+			};
+
+			init();
+		</script>
+	</body>
+</html>
