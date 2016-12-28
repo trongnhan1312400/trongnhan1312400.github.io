@@ -38,7 +38,7 @@
 
 			var lookupTable;
 
-			var animate;
+			var rotateCells;
 			var speed;
 			var isPlaying;
 			var dir;
@@ -128,6 +128,8 @@
 
 				var ratio = cWidth / cHeight;
 
+				console.log(ratio);
+
 				for (var i = 0; i < 6; i++)
 				{
 					for (var j = 2; j < 4; j++)
@@ -172,6 +174,7 @@
 						camera.updateProjectionMatrix();
 
 						setSupportContainer();
+						supportRender();
 					}
 				}
 			}
@@ -231,10 +234,10 @@
 			{
 				if (isCreated == false)
 				{
-					animate = getRotateCellsIndex(megaminx, currentFace);
-					animate = getObjFromCellsIndex(megaminx, animate);
+					rotateCells = getRotateCellsIndex(megaminx, currentFace);
+					rotateCells = getObjFromCellsIndex(megaminx, rotateCells);
 
-					scene.add(animate);
+					scene.add(rotateCells);
 
 					isCreated = true;
 				}
@@ -266,6 +269,7 @@
 				camera.position.z = cameraRadius;
 
 				control = new THREE.OrbitControls(camera, mainRenderer.domElement);
+				control.enableKeys = false;
 				control.enablePan = false;
 				control.enableDamping = true;
 				control.dampingFactor = 0.25;
@@ -311,9 +315,6 @@
 				mainRenderer.domElement.addEventListener('mouseup', onMouseUp);
 
 				window.addEventListener('resize', onWindowResize);
-
-				var mainInterval = setInterval(render, 16);
-				var supportInterval = setInterval(supportRender, 100);
 			}
 
 			function onWindowResize()
@@ -335,6 +336,7 @@
 				camera.updateProjectionMatrix();
 
 				fixSupportThing();
+				supportRender();
 			}
 
 			function onMouseMove(event)
@@ -370,6 +372,15 @@
 				}
 			}
 
+			function animate()
+			{
+				requestAnimationFrame(animate);
+
+				pick();
+
+				render();
+			};
+
 			function pick()
 			{
 				raycaster.setFromCamera(mouse.clone(), camera );
@@ -384,11 +395,10 @@
 				{
 					rotateFace = -1;
 				}
-			}
+			};
 
 			var render = function () 
 			{
-				pick();
 
 				if (currentFace < 0)
 				{
@@ -398,16 +408,18 @@
 				if (isPlaying == true)
 				{
 					createRotateObj(megaminx);
-					animate.rotateOnAxis(lookupTable[currentFace].axis, dir * 0.72 * speed.value * DEG_TO_RAD)
+					rotateCells.rotateOnAxis(lookupTable[currentFace].axis, dir * 0.72 * speed.value * DEG_TO_RAD)
 
 					rotateCorner += 0.72 * speed.value;
 
 					if (rotateCorner >= 72)
 					{
+						supportRender();
+						
 						rotateCorner = 0;
 
-						removeCellsFromObj(megaminx, getRotateCellsIndex(megaminx, currentFace), animate);
-						scene.remove(animate);
+						removeCellsFromObj(megaminx, getRotateCellsIndex(megaminx, currentFace), rotateCells);
+						scene.remove(rotateCells);
 
 						updateRotateCell(megaminx, currentFace, dir);
 						updateMegaminx(megaminx);
@@ -439,6 +451,9 @@
 			};
 
 			init();
+			render();
+			supportRender();
+			animate();
 		</script>
 	</body>
 </html>
